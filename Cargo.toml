@@ -1,0 +1,6 @@
+[package]
+name = "socket-io"
+version = "0.1.0"
+authors = ["Vibhav Pant <vibhavp@gmail.com>"]
+
+[dependencies]
