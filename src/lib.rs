@@ -1,6 +1,10 @@
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-    }
-}
+extern crate engine_io;
+extern crate iron;
+extern crate serde;
+extern crate serde_json;
+
+pub mod server;
+pub mod socket;
+pub mod packet;
+
+pub const PROTOCOL_VERSION: usize = 4;
