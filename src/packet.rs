@@ -1,5 +1,7 @@
-use std::str::FromStr;
 use std::mem;
+use std::string::FromUtf8Error;
+use std::convert::From;
+use std::iter::Peekable;
 
 use engine_io::packet;
 use serde_json::ser::to_string;
@@ -23,6 +25,8 @@ pub struct Packet {
     pub namespace: Option<String>,
     pub opcode: Opcode,
     pub id: Option<usize>,
+    /// Number of attachments
+    pub attachments: usize,
     pub data: Option<Value>,
 }
 
@@ -32,26 +36,53 @@ pub enum Error {
     InvalidPacket,
     PacketDataNotArray,
     JSONError(JSONError),
+    FromUtf8Error(FromUtf8Error),
 }
 
-impl FromStr for Packet {
-    type Err = Error;
-    fn from_str(s: &str) -> Result<Packet, Error> {
-        let mut chars = s.chars().peekable();
+impl From<JSONError> for Error {
+    fn from(e: JSONError) -> Error {
+        Error::JSONError(e)
+    }
+}
+
+impl From<FromUtf8Error> for Error {
+    fn from(e: FromUtf8Error) -> Error {
+        Error::FromUtf8Error(e)
+    }
+}
+
+impl Packet {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Packet, Error> {
+        let mut chars: Peekable<_> = bytes.iter().peekable();
 
         let opcode: Opcode = match chars.next() {
-            Some(c) if c > (Opcode::BinaryAck as u8 as char) =>
-                return Err(Error::InvalidOpcode(c as u8)),
-            Some(c) => unsafe{mem::transmute(c as u8)},
+            Some(c) if *c > (Opcode::BinaryAck as u8) =>
+                return Err(Error::InvalidOpcode(*c as u8)),
+            Some(c) => unsafe{mem::transmute(*c as u8)},
             None => return Err(Error::InvalidPacket),
         };
 
-        let nsp = if chars.peek() == Some(&'/') {
+        let mut attachments = 0;
+        if opcode == Opcode::BinaryAck || opcode == Opcode::BinaryEvent {
+            while let Some(c) = chars.next() {
+                if chars.len() == 0 {
+                    return Err(Error::InvalidPacket)
+                }
+                if *c == '-' as u8 {
+                    break;
+                }
+                attachments = 10 * attachments +
+                    try!((*c as char).to_digit(10)
+                         .ok_or(Error::InvalidPacket)) as usize;
+            }
+        }
+
+        let nsp = if chars.peek().map_or(false, |ch| **ch == '/' as u8) {
             let mut s = String::new();
             loop {
                 match chars.next() {
-                    Some(',') | None => break,
-                    Some(c) => s.push(c),
+                    Some(c) if *c as char != ',' => s.push(*c as char),
+                    _ => break,
                 }
             }
             Some(s)
@@ -62,8 +93,8 @@ impl FromStr for Packet {
         let mut id: usize = 0;
         let mut has_id = false;
         loop {
-            if chars.peek().map_or(false, |ch| *ch >= '0' && *ch <= '9') {
-                id = id * 10 + chars.next().unwrap().to_digit(10).unwrap() as usize;
+            if chars.peek().map_or(false, |ch| **ch >= '0' as u8 && **ch <= '9' as u8) {
+                id = id * 10 + (*chars.next().unwrap() as char).to_digit(10).unwrap() as usize;
                 has_id = true;
             } else {
                 break;
@@ -73,8 +104,8 @@ impl FromStr for Packet {
         let data: Option<Value> = match opcode {
             Opcode::Event | Opcode::BinaryEvent | Opcode::Ack | Opcode::BinaryAck
                 => {
-                    let js: String = chars.collect();
-                    let parsed: Value = try!(from_str(&js).map_err(|e| Error::JSONError(e)));
+                    let js = try!(String::from_utf8(chars.map(|c| *c).collect()));
+                    let parsed: Value = try!(from_str(&js));
 
                     if (opcode == Opcode::Event || opcode == Opcode::BinaryEvent)
                         && !parsed.is_array() {
@@ -88,6 +119,7 @@ impl FromStr for Packet {
 
         Ok(Packet {
             namespace: nsp,
+            attachments: attachments,
             opcode: opcode,
             id: if has_id {Some(id)} else {None},
             data: data
@@ -101,6 +133,10 @@ impl Packet {
         let mut nsp = false;
 
         s.push((self.opcode as u8) as char);
+        if self.attachments != 0 {
+            s.push_str(&self.attachments.to_string());
+            s.push('-');
+        }
         if let Some(ref n) = self.namespace {
             s.push_str(n);
             nsp = true;
@@ -111,7 +147,6 @@ impl Packet {
                 s.push(',');
                 nsp = false;
             }
-            //println!("id");
             s.push_str(&id.to_string());
         }
 
@@ -119,7 +154,6 @@ impl Packet {
             if nsp {
                 s.push(',');
             }
-            //println!("data");
             s.push_str(&to_string(data).unwrap());
         }
 
@@ -140,13 +174,13 @@ mod tests {
     use super::Opcode::*;
     use super::Packet;
     use serde_json::value::to_value;
-    use std::str::FromStr;
 
     macro_rules! packet {
         ((data $data:expr ); $(( $x:ident $y:expr ));*) => {
             {
                 let mut packet = Packet{
                     namespace: None,
+                    attachments: 0,
                     opcode: Event,
                     id: None,
                     data: Some(to_value($data)),
@@ -172,6 +206,7 @@ mod tests {
             {
                 Packet {
                     namespace: None,
+                    attachments: 0,
                     opcode: Connect,
                     id: None,
                     data: None,
@@ -196,7 +231,7 @@ mod tests {
     }
 
     fn test_decoding(s: &str, packet: &Packet) {
-        let decoded = Packet::from_str(s).expect("Decoding packet");
+        let decoded = Packet::from_bytes(s.as_bytes()).expect("Decoding packet");
         assert_eq!(&decoded, packet);
     }
 
@@ -205,9 +240,12 @@ mod tests {
                                        (opcode Connect))
           , "0/abc");
     test!(namespace_vec, packet!((data &vec!["foo", "bar"]);
-                                       (namespace Some("/foo".to_string()))),
+                                 (namespace Some("/foo".to_string()))),
           "2/foo,[\"foo\",\"bar\"]");
     test!(id_namespace_vec, packet!((data &vec![1,2,3,4]);
-                                         (namespace Some("/abc".to_string()));
-                                         (id Some(1))), "2/abc,1[1,2,3,4]");
+                                    (namespace Some("/abc".to_string()));
+                                    (id Some(1))), "2/abc,1[1,2,3,4]");
+    test!(attachment, packet!((data &vec![1]);
+                              (attachments 1);
+                              (opcode BinaryEvent)), "51-[1]");
 }
