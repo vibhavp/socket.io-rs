@@ -78,13 +78,9 @@ impl Packet {
         }
 
         let nsp = if chars.peek().map_or(false, |ch| **ch == '/' as u8) {
-            let mut s = String::new();
-            loop {
-                match chars.next() {
-                    Some(c) if *c as char != ',' => s.push(*c as char),
-                    _ => break,
-                }
-            }
+            let s = try!(String::from_utf8(chars.by_ref().
+                                           take_while(|c| **c != b',')
+                                           .map(|c| *c).collect()));
             Some(s)
         } else {
             None
@@ -92,8 +88,9 @@ impl Packet {
 
         let mut id: usize = 0;
         let mut has_id = false;
+
         loop {
-            if chars.peek().map_or(false, |ch| **ch >= '0' as u8 && **ch <= '9' as u8) {
+            if chars.peek().map_or(false, |ch: &&u8| **ch >= b'0' && **ch <= b'9') {
                 id = id * 10 + (*chars.next().unwrap() as char).to_digit(10).unwrap() as usize;
                 has_id = true;
             } else {
@@ -114,7 +111,7 @@ impl Packet {
 
                     Some(parsed)
                 },
-            _ => None
+            _ => None,
         };
 
         Ok(Packet {

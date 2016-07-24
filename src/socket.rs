@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use engine_io::socket;
+use packet::Packet;
 
 #[derive(Clone)]
 pub struct Socket {
@@ -17,8 +18,8 @@ unsafe impl Sync for Socket{}
 impl Socket {
     #[doc(hidden)]
     pub fn new(socket: socket::Socket, server_rooms: Arc<RwLock<HashMap<String, Vec<Socket>>>>) -> Socket {
-        socket.on_message(|msg| {
-
+        socket.on_message(|bytes| {
+            let packet = Packet::from_bytes(bytes);
         });
         Socket {
             socket: socket,
