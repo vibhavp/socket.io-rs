@@ -1,15 +1,18 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, Mutex};
 
 use engine_io::socket;
-use packet::Packet;
+use packet::{Packet, Opcode};
+use serde_json:Value;
 
 #[derive(Clone)]
 pub struct Socket {
     socket: socket::Socket,
-    callbacks: Arc<RwLock<HashMap<String, Box<Fn(Vec<u8>) + 'static>>>>,
+    callbacks: Arc<RwLock<HashMap<Value, Box<Fn(Value, Option<Vec<Vec<u8>>>) + 'static>>>>,
+    acks: Arc<Mutex<HashMap<usize, Box<Fn(Vec<u8>)>>>>,
     rooms_joined: Arc<RwLock<Vec<String>>>,
     server_rooms: Arc<RwLock<HashMap<String, Vec<Socket>>>>,
+    cur_packet: Arc<RwLock<Option<Packet>>>,
 }
 
 unsafe impl Send for Socket{}
@@ -17,16 +20,55 @@ unsafe impl Sync for Socket{}
 
 impl Socket {
     #[doc(hidden)]
-    pub fn new(socket: socket::Socket, server_rooms: Arc<RwLock<HashMap<String, Vec<Socket>>>>) -> Socket {
-        socket.on_message(|bytes| {
-            let packet = Packet::from_bytes(bytes);
-        });
-        Socket {
+    pub fn new(socket: socket::Socket, server_rooms:
+               Arc<RwLock<HashMap<String, Vec<Socket>>>>) -> Socket {
+        let so = Socket {
             socket: socket,
             callbacks: Arc::new(RwLock::new(HashMap::new())),
             rooms_joined: Arc::new(RwLock::new(Vec::new())),
             server_rooms: server_rooms,
-        }
+            cur_packet: Arc::new(RwLock::new(None)),
+        };
+        let cl = so.clone();
+
+        socket.on_message(|bytes| {
+            if so.has_buffered_packet() {
+                let mut packet = so.cur_packet.write().unwrap();
+                if packet.add_attachment(bytes.into_vec()) {
+                    // received all attachments, fire relevant
+                    // callback/ack
+                    
+                } else {
+                    return;
+                }
+            }
+
+            let packet = try!(Packet::from_bytes(bytes).map_err(|_| ()));
+	    if packet.attachments != 0 {
+                if packet.opcde != Opcode::BinaryEvent ||
+                    packet.opcode != Opcode::BinaryAck {
+                        // since only BinaryEvent and BinaryAck
+                        // can have attachments
+                        return;
+                    }
+	        // packet has an attachment
+	        let mut cur = so.cur_packet.write().unwrap();
+                *cur = Some(packet);
+                return;
+	    }
+        });
+
+        cl
+    }
+
+    fn fire_callback(&self, packet: &Packet) {
+        let callbacks = self.callbacks.read().unwrap();
+        
+    }
+    
+    fn has_buffered_packet(&self) -> bool {
+        let cur = so.cur_packet.read().unwrap();
+        cur.is_some()
     }
 
     pub fn id(&self) -> String {
@@ -34,7 +76,7 @@ impl Socket {
     }
 
     pub fn on<F>(&self, event: String, f: F)
-        where F: Fn(Vec<u8>) + 'static {
+        where F: Fn(Vec<u8>, Option<Vec<Vec<u8>>>) + 'static {
         let mut map = self.callbacks.write().unwrap();
         map.insert(event, Box::new(f));
     }

@@ -26,8 +26,9 @@ pub struct Packet {
     pub opcode: Opcode,
     pub id: Option<usize>,
     /// Number of attachments
-    pub attachments: usize,
+    pub attachments_num: usize,
     pub data: Option<Value>,
+    attachments: Option<Vec<Vec<u8>>>,
 }
 
 #[derive(Debug)]
@@ -52,6 +53,22 @@ impl From<FromUtf8Error> for Error {
 }
 
 impl Packet {
+    #[doc(hidden)]
+    pub fn add_attachment(&mut self, bytes: Vec<u8>) -> bool {
+        if self.attachments.is_none() {
+            self.attachments = Some(vec![]);
+        }
+
+        debug_assert!(self.attachments.unwrap().len() != self.attachments_num);
+        self.attachments.unwrap().push(bytes);
+        self.attachments.unwrap().len() == self.attachments_num
+    }
+
+    #[doc(hidden)]
+    pub fn get_attachments(&self) -> Option<Vec<Vec<u8>>> {
+        self.attachments.clone()
+    }
+
     pub fn from_bytes(bytes: &[u8]) -> Result<Packet, Error> {
         let mut chars: Peekable<_> = bytes.iter().peekable();
 
@@ -62,7 +79,7 @@ impl Packet {
             None => return Err(Error::InvalidPacket),
         };
 
-        let mut attachments = 0;
+        let mut attachments_num = 0;
         if opcode == Opcode::BinaryAck || opcode == Opcode::BinaryEvent {
             while let Some(c) = chars.next() {
                 if chars.len() == 0 {
@@ -71,7 +88,7 @@ impl Packet {
                 if *c == '-' as u8 {
                     break;
                 }
-                attachments = 10 * attachments +
+                attachments_num = 10 * attachments_num +
                     try!((*c as char).to_digit(10)
                          .ok_or(Error::InvalidPacket)) as usize;
             }
@@ -116,7 +133,7 @@ impl Packet {
 
         Ok(Packet {
             namespace: nsp,
-            attachments: attachments,
+            attachments_num: attachments_num,
             opcode: opcode,
             id: if has_id {Some(id)} else {None},
             data: data
@@ -130,8 +147,8 @@ impl Packet {
         let mut nsp = false;
 
         s.push((self.opcode as u8) as char);
-        if self.attachments != 0 {
-            s.push_str(&self.attachments.to_string());
+        if self.attachments_num != 0 {
+            s.push_str(&self.attachments_num.to_string());
             s.push('-');
         }
         if let Some(ref n) = self.namespace {
@@ -177,7 +194,7 @@ mod tests {
             {
                 let mut packet = Packet{
                     namespace: None,
-                    attachments: 0,
+                    attachments_num: 0,
                     opcode: Event,
                     id: None,
                     data: Some(to_value($data)),
@@ -203,7 +220,7 @@ mod tests {
             {
                 Packet {
                     namespace: None,
-                    attachments: 0,
+                    attachments_num: 0,
                     opcode: Connect,
                     id: None,
                     data: None,
@@ -243,6 +260,6 @@ mod tests {
                                     (namespace Some("/abc".to_string()));
                                     (id Some(1))), "2/abc,1[1,2,3,4]");
     test!(attachment, packet!((data &vec![1]);
-                              (attachments 1);
+                              (attachments_num 1);
                               (opcode BinaryEvent)), "51-[1]");
 }
