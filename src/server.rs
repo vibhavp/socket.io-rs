@@ -1,5 +1,4 @@
-use std::sync::Arc;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use std::collections::HashMap;
 
 use socket::Socket;

@@ -1,6 +1,7 @@
 use serde_json::Value;
 use serde_json::de::from_str;
 
+#[derive(Clone)]
 pub enum Data {
     JSON(Value),
     Binary(Vec<u8>)

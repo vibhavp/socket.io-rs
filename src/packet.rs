@@ -38,6 +38,8 @@ pub enum Error {
     PacketDataNotArray,
     JSONError(JSONError),
     FromUtf8Error(FromUtf8Error),
+    NoEvent,
+    AckIDMissing,
 }
 
 impl From<JSONError> for Error {
@@ -54,19 +56,39 @@ impl From<FromUtf8Error> for Error {
 
 impl Packet {
     #[doc(hidden)]
+    pub fn new_event(namespace: Option<String>,
+                     id: Option<usize>, attachments_num: usize,
+                     params: Value) -> Packet {
+        debug_assert!(params.is_array());
+        Packet {
+            namespace: namespace,
+            attachments_num: attachments_num,
+            opcode: if attachments_num == 0 {Opcode::Event} else {Opcode::BinaryEvent},
+            id: id,
+            data: Some(params),
+            attachments: None,
+        }
+    }
+    
+    #[doc(hidden)]
     pub fn add_attachment(&mut self, bytes: Vec<u8>) -> bool {
         if self.attachments.is_none() {
             self.attachments = Some(vec![]);
         }
 
-        debug_assert!(self.attachments.unwrap().len() != self.attachments_num);
-        self.attachments.unwrap().push(bytes);
-        self.attachments.unwrap().len() == self.attachments_num
+        debug_assert!(self.attachments.as_ref().unwrap().len() != self.attachments_num);
+        self.attachments.as_mut().unwrap().push(bytes);
+        self.attachments.as_ref().unwrap().len() == self.attachments_num
     }
 
     #[doc(hidden)]
     pub fn get_attachments(&self) -> Option<Vec<Vec<u8>>> {
         self.attachments.clone()
+    }
+
+    #[doc(hidden)]
+    pub fn has_attachments(&self) -> bool {
+        self.attachments.is_some()
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Packet, Error> {
@@ -123,7 +145,14 @@ impl Packet {
 
                     if (opcode == Opcode::Event || opcode == Opcode::BinaryEvent)
                         && !parsed.is_array() {
-                        return Err(Error::PacketDataNotArray);
+                            return Err(Error::PacketDataNotArray);
+                        }
+                    if (opcode == Opcode::Ack || opcode == Opcode::BinaryAck)
+                        && !has_id {
+                            return Err(Error::AckIDMissing);
+                        }
+                    if parsed.as_array().unwrap().is_empty() {
+                        return Err(Error::NoEvent);
                     }
 
                     Some(parsed)
@@ -133,15 +162,14 @@ impl Packet {
 
         Ok(Packet {
             namespace: nsp,
+            attachments: None,
             attachments_num: attachments_num,
             opcode: opcode,
             id: if has_id {Some(id)} else {None},
             data: data
         })
     }
-}
 
-impl Packet {
     pub fn encode(&self) -> String {
         let mut s = String::new();
         let mut nsp = false;
@@ -194,6 +222,7 @@ mod tests {
             {
                 let mut packet = Packet{
                     namespace: None,
+                    attachments: None,
                     attachments_num: 0,
                     opcode: Event,
                     id: None,
@@ -220,6 +249,7 @@ mod tests {
             {
                 Packet {
                     namespace: None,
+                    attachments: None,
                     attachments_num: 0,
                     opcode: Connect,
                     id: None,
