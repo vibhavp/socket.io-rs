@@ -88,11 +88,13 @@ impl Packet {
     }
 
     #[doc(hidden)]
+    #[inline(always)]
     pub fn get_attachments(&self) -> Option<Vec<Vec<u8>>> {
         self.attachments.clone()
     }
 
     #[doc(hidden)]
+    #[inline(always)]
     pub fn has_attachments(&self) -> bool {
         self.attachments.is_some()
     }
