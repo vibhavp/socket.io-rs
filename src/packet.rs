@@ -17,7 +17,7 @@ pub enum Opcode {
     Ack = '3' as isize,
     Error = '4' as isize,
     BinaryEvent = '5' as isize,
-    BinaryAck = '6' as isize
+    BinaryAck = '6' as isize,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -57,19 +57,25 @@ impl From<FromUtf8Error> for Error {
 impl Packet {
     #[doc(hidden)]
     pub fn new_event(namespace: Option<String>,
-                     id: Option<usize>, attachments_num: usize,
-                     params: Value) -> Packet {
+                     id: Option<usize>,
+                     attachments_num: usize,
+                     params: Value)
+                     -> Packet {
         debug_assert!(params.is_array());
         Packet {
             namespace: namespace,
             attachments_num: attachments_num,
-            opcode: if attachments_num == 0 {Opcode::Event} else {Opcode::BinaryEvent},
+            opcode: if attachments_num == 0 {
+                Opcode::Event
+            } else {
+                Opcode::BinaryEvent
+            },
             id: id,
             data: Some(params),
             attachments: None,
         }
     }
-    
+
     #[doc(hidden)]
     pub fn add_attachment(&mut self, bytes: Vec<u8>) -> bool {
         if self.attachments.is_none() {
@@ -95,9 +101,8 @@ impl Packet {
         let mut chars: Peekable<_> = bytes.iter().peekable();
 
         let opcode: Opcode = match chars.next() {
-            Some(c) if *c > (Opcode::BinaryAck as u8) =>
-                return Err(Error::InvalidOpcode(*c as u8)),
-            Some(c) => unsafe{mem::transmute(*c as u8)},
+            Some(c) if *c > (Opcode::BinaryAck as u8) => return Err(Error::InvalidOpcode(*c as u8)),
+            Some(c) => unsafe { mem::transmute(*c as u8) },
             None => return Err(Error::InvalidPacket),
         };
 
@@ -105,21 +110,23 @@ impl Packet {
         if opcode == Opcode::BinaryAck || opcode == Opcode::BinaryEvent {
             while let Some(c) = chars.next() {
                 if chars.len() == 0 {
-                    return Err(Error::InvalidPacket)
+                    return Err(Error::InvalidPacket);
                 }
                 if *c == '-' as u8 {
                     break;
                 }
                 attachments_num = 10 * attachments_num +
-                    try!((*c as char).to_digit(10)
-                         .ok_or(Error::InvalidPacket)) as usize;
+                                  try!((*c as char)
+                    .to_digit(10)
+                    .ok_or(Error::InvalidPacket)) as usize;
             }
         }
 
         let nsp = if chars.peek().map_or(false, |ch| **ch == '/' as u8) {
-            let s = try!(String::from_utf8(chars.by_ref().
-                                           take_while(|c| **c != b',')
-                                           .map(|c| *c).collect()));
+            let s = try!(String::from_utf8(chars.by_ref()
+                .take_while(|c| **c != b',')
+                .map(|c| *c)
+                .collect()));
             Some(s)
         } else {
             None
@@ -138,25 +145,23 @@ impl Packet {
         }
 
         let data: Option<Value> = match opcode {
-            Opcode::Event | Opcode::BinaryEvent | Opcode::Ack | Opcode::BinaryAck
-                => {
-                    let js = try!(String::from_utf8(chars.map(|c| *c).collect()));
-                    let parsed: Value = try!(from_str(&js));
+            Opcode::Event | Opcode::BinaryEvent | Opcode::Ack | Opcode::BinaryAck => {
+                let js = try!(String::from_utf8(chars.map(|c| *c).collect()));
+                let parsed: Value = try!(from_str(&js));
 
-                    if (opcode == Opcode::Event || opcode == Opcode::BinaryEvent)
-                        && !parsed.is_array() {
-                            return Err(Error::PacketDataNotArray);
-                        }
-                    if (opcode == Opcode::Ack || opcode == Opcode::BinaryAck)
-                        && !has_id {
-                            return Err(Error::AckIDMissing);
-                        }
-                    if parsed.as_array().unwrap().is_empty() {
-                        return Err(Error::NoEvent);
-                    }
+                if (opcode == Opcode::Event || opcode == Opcode::BinaryEvent) &&
+                   !parsed.is_array() {
+                    return Err(Error::PacketDataNotArray);
+                }
+                if (opcode == Opcode::Ack || opcode == Opcode::BinaryAck) && !has_id {
+                    return Err(Error::AckIDMissing);
+                }
+                if parsed.as_array().unwrap().is_empty() {
+                    return Err(Error::NoEvent);
+                }
 
-                    Some(parsed)
-                },
+                Some(parsed)
+            }
             _ => None,
         };
 
@@ -165,8 +170,12 @@ impl Packet {
             attachments: None,
             attachments_num: attachments_num,
             opcode: opcode,
-            id: if has_id {Some(id)} else {None},
-            data: data
+            id: if has_id {
+                Some(id)
+            } else {
+                None
+            },
+            data: data,
         })
     }
 
@@ -204,7 +213,7 @@ impl Packet {
 
     /// Encode the packet to a engine.io `Packet`.
     pub fn encode_to_engine_packet(&self) -> packet::Packet {
-        packet::Packet{
+        packet::Packet {
             id: packet::ID::Message,
             data: self.encode().into_bytes(),
         }

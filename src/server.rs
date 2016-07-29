@@ -40,15 +40,18 @@ impl Server {
                 let mut clients = socketio_server.clients.write().unwrap();
                 clients.push(socketio_socket.clone());
             }
-            socketio_server.on_connection.read().unwrap().as_ref().
-                map(|func| func(socketio_socket));
+            socketio_server.on_connection
+                .read()
+                .unwrap()
+                .as_ref()
+                .map(|func| func(socketio_socket));
         });
 
         cl1
     }
 
     #[inline(always)]
-    pub fn new() -> Server { 
+    pub fn new() -> Server {
         Server::from_server(server::Server::new())
     }
 
@@ -57,7 +60,7 @@ impl Server {
         where F: Fn(Socket) + 'static
     {
         *self.on_connection.write().unwrap() = Some(Box::new(f));
-    }    
+    }
 
     pub fn close(&mut self) {
         let mut clients = self.clients.write().unwrap();

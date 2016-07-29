@@ -11,9 +11,7 @@ use packet::{Packet, Opcode};
 #[derive(Clone)]
 pub struct Socket {
     socket: socket::Socket,
-    callbacks: Arc<RwLock<HashMap<String,
-                                  Box<Fn(Vec<Value>,
-                                         Option<Vec<Vec<u8>>>) -> Vec<Data>>>>>,
+    callbacks: Arc<RwLock<HashMap<String, Box<Fn(Vec<Value>, Option<Vec<Vec<u8>>>) -> Vec<Data>>>>>,
     acks: Arc<Mutex<HashMap<usize, Box<Fn(Option<Value>, Option<Vec<Vec<u8>>>)>>>>,
     rooms_joined: Arc<RwLock<Vec<String>>>,
     server_rooms: Arc<RwLock<HashMap<String, Vec<Socket>>>>,
@@ -22,13 +20,14 @@ pub struct Socket {
     namespace: Option<String>,
 }
 
-unsafe impl Send for Socket{}
-unsafe impl Sync for Socket{}
+unsafe impl Send for Socket {}
+unsafe impl Sync for Socket {}
 
 impl Socket {
     #[doc(hidden)]
     pub fn new(socket: socket::Socket,
-               server_rooms: Arc<RwLock<HashMap<String, Vec<Socket>>>>) -> Socket {
+               server_rooms: Arc<RwLock<HashMap<String, Vec<Socket>>>>)
+               -> Socket {
         let so = Socket {
             socket: socket.clone(),
             callbacks: Arc::new(RwLock::new(HashMap::new())),
@@ -63,12 +62,12 @@ impl Socket {
                                     so.send("[]".to_string().into_bytes());
                                 }
                             }
-                        },
+                        }
                         Opcode::BinaryAck => {
                             // fire ack callback
                             so.fire_ack(packet.take().unwrap());
-                        },
-                        _ => unreachable!()
+                        }
+                        _ => unreachable!(),
                     }
                 } else {
                     return;
@@ -79,16 +78,15 @@ impl Socket {
                 Ok(p) => p,
                 Err(_) => return, //TODO: emit error here
             };
-	    if packet.has_attachments() {
-                if packet.opcode == Opcode::BinaryEvent ||
-                    packet.opcode == Opcode::BinaryAck {
-                        // BinaryEvent and BinaryAck
-                        // can have attachments
-                        let mut cur = so.cur_packet.write().unwrap();
-                        *cur = Some(packet);
-                    }
+            if packet.has_attachments() {
+                if packet.opcode == Opcode::BinaryEvent || packet.opcode == Opcode::BinaryAck {
+                    // BinaryEvent and BinaryAck
+                    // can have attachments
+                    let mut cur = so.cur_packet.write().unwrap();
+                    *cur = Some(packet);
+                }
                 return;
-	    }
+            }
         });
 
         cl
@@ -128,7 +126,8 @@ impl Socket {
     }
 
     pub fn on<F>(&self, event: String, f: F)
-        where F: Fn(Vec<Value>, Option<Vec<Vec<u8>>>) -> Vec<Data> + 'static  {
+        where F: Fn(Vec<Value>, Option<Vec<Vec<u8>>>) -> Vec<Data> + 'static
+    {
         let mut map = self.callbacks.write().unwrap();
         map.insert(event, Box::new(f));
     }
@@ -161,16 +160,18 @@ impl Socket {
         }
 
         let (json, binary_vec) = encode_data(all_event_params);
-        self.send(Packet::new_event(self.namespace.clone(), None, binary_vec.len(),
-                                    json).encode().into_bytes());
+        self.send(Packet::new_event(self.namespace.clone(), None, binary_vec.len(), json)
+            .encode()
+            .into_bytes());
         for binary in binary_vec {
             self.send(binary);
         }
     }
 
     pub fn emit_ack<F>(&self, event: Value, params: Option<Vec<Data>>, on_ack: F)
-        where F: Fn(Option<Value>, Option<Vec<Vec<u8>>>) + 'static {
-                let mut all_event_params: Vec<_> = vec![Data::JSON(event)];
+        where F: Fn(Option<Value>, Option<Vec<Vec<u8>>>) + 'static
+    {
+        let mut all_event_params: Vec<_> = vec![Data::JSON(event)];
         if params.is_some() {
             all_event_params.extend_from_slice(&params.unwrap());
         }
@@ -181,8 +182,9 @@ impl Socket {
             map.insert(ack_id, Box::new(on_ack));
         }
         let (json, binary_vec) = encode_data(all_event_params);
-        self.send(Packet::new_event(self.namespace.clone(), Some(ack_id),
-                                    binary_vec.len(), json).encode().into_bytes());
+        self.send(Packet::new_event(self.namespace.clone(), Some(ack_id), binary_vec.len(), json)
+            .encode()
+            .into_bytes());
         for binary in binary_vec {
             self.send(binary);
         }
@@ -204,7 +206,7 @@ impl Socket {
             for (index, so) in clients.iter().enumerate() {
                 if so.id() == self.id() {
                     i = index;
-                    break
+                    break;
                 }
             }
 

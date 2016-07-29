@@ -4,7 +4,7 @@ use serde_json::de::from_str;
 #[derive(Clone)]
 pub enum Data {
     JSON(Value),
-    Binary(Vec<u8>)
+    Binary(Vec<u8>),
 }
 
 #[doc(hidden)]
@@ -18,7 +18,7 @@ pub fn encode_data(data: Vec<Data>) -> (Value, Vec<Vec<u8>>) {
             Data::JSON(v) => v,
             Data::Binary(b) => {
                 binary.push(b);
-                placeholder_num = placeholder_num+1;
+                placeholder_num = placeholder_num + 1;
                 placeholder(placeholder_num)
             }
         })
