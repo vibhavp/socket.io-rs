@@ -18,6 +18,7 @@ pub struct Socket {
     cur_packet: Arc<RwLock<Option<Packet>>>,
     last_ack_id: Arc<AtomicUsize>,
     namespace: Option<String>,
+    on_close: Arc<RwLock<Option<Box<Fn()>>>>,
 }
 
 unsafe impl Send for Socket {}
@@ -37,6 +38,7 @@ impl Socket {
             namespace: None,
             cur_packet: Arc::new(RwLock::new(None)),
             last_ack_id: Arc::new(AtomicUsize::new(0)),
+            on_close: Arc::new(RwLock::new(None)),
         };
         let cl = so.clone();
 
@@ -46,9 +48,9 @@ impl Socket {
                 if packet.as_mut().unwrap().add_attachment(bytes.to_vec()) {
                     // received all attachments, fire relevant
                     // callback/ack
-                    match packet.as_ref().unwrap().opcode {
-                        Opcode::BinaryEvent => {
-                            let packet = packet.take().unwrap();
+                    let packet = packet.take().unwrap();
+                    match packet.opcode {
+                        Opcode::BinaryEvent | Opcode::Event => {
                             let ack = so.fire_callback(&packet);
 
                             if packet.id.is_some() {
@@ -63,10 +65,7 @@ impl Socket {
                                 }
                             }
                         }
-                        Opcode::BinaryAck => {
-                            // fire ack callback
-                            so.fire_ack(packet.take().unwrap());
-                        }
+                        Opcode::BinaryAck | Opcode::Ack => so.fire_ack(packet),
                         _ => unreachable!(),
                     }
                 } else {
@@ -86,6 +85,13 @@ impl Socket {
                     *cur = Some(packet);
                 }
                 return;
+            }
+        });
+
+        let so2 = cl.clone();
+        socket.on_close(move |_| {
+            if let Some(ref func) = *so2.on_close.read().unwrap() {
+                func();
             }
         });
 
@@ -153,6 +159,7 @@ impl Socket {
         self.socket.send(data);
     }
 
+    /// Emit an event to the client, with the name `event`.
     pub fn emit(&self, event: Value, params: Option<Vec<Data>>) {
         let mut all_event_params: Vec<_> = vec![Data::JSON(event)];
         if params.is_some() {
@@ -168,6 +175,8 @@ impl Socket {
         }
     }
 
+    /// Emit an event to the client, and ask the client for an
+    /// acknowledgment. Once received, call `on_ack`.
     pub fn emit_ack<F>(&self, event: Value, params: Option<Vec<Data>>, on_ack: F)
         where F: Fn(Option<Value>, Option<Vec<Vec<u8>>>) + 'static
     {
@@ -194,6 +203,7 @@ impl Socket {
         self.last_ack_id.fetch_add(1, Relaxed)
     }
 
+    /// Close the connection to the client.
     pub fn close(&mut self) {
         self.socket.close("close()");
         let rooms_joined = self.rooms_joined.read().unwrap();
