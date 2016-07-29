@@ -4,9 +4,10 @@ description = "A socket.io library for Iron."
 documentation = "https://vibhavp.github.io/engine.io-rs"
 version = "0.1.0"
 authors = ["Vibhav Pant <vibhavp@gmail.com>"]
+license = "MIT"
 
 [dependencies]
 engine-io = "0.1.1"
 iron = "0.4.0"
-serde = "*"
-serde_json = "*"
+serde = "0.8.0"
+serde_json = "0.8.0"
