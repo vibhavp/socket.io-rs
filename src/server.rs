@@ -1,10 +1,12 @@
 use std::sync::{Arc, RwLock};
 use std::collections::HashMap;
 
+use data::Data;
 use socket::Socket;
 use engine_io::server;
 use iron::prelude::*;
 use iron::middleware::Handler;
+use serde_json::Value;
 
 #[derive(Clone)]
 pub struct Server {
@@ -55,6 +57,7 @@ impl Server {
         Server::from_server(server::Server::new())
     }
 
+    /// Set callback to be called on connecting to a new client.
     #[inline(always)]
     pub fn on_connection<F>(&self, f: F)
         where F: Fn(Socket) + 'static
@@ -62,10 +65,20 @@ impl Server {
         *self.on_connection.write().unwrap() = Some(Box::new(f));
     }
 
+    /// Close connection to all clients.
     pub fn close(&mut self) {
         let mut clients = self.clients.write().unwrap();
         for so in clients.iter_mut() {
             so.close();
+        }
+    }
+
+    /// Emits an event with the value `event` and parameters
+    /// `params` to all connected clients.
+    pub fn emit(&self, event: Value, params: Option<Vec<Data>>) {
+        let map = self.clients.read().unwrap();
+        for so in map.iter() {
+            so.emit(event.clone(), params.clone());
         }
     }
 }
