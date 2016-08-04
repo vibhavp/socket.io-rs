@@ -5,7 +5,7 @@ extern crate serde_json;
 
 pub mod server;
 pub mod socket;
-pub mod packet;
 pub mod data;
+mod packet;
 
 pub const PROTOCOL_VERSION: usize = 4;
