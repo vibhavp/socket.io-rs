@@ -3,7 +3,6 @@ use std::string::FromUtf8Error;
 use std::convert::From;
 use std::iter::Peekable;
 
-use engine_io::packet;
 use serde_json::ser::to_string;
 use serde_json::de::from_str;
 use serde_json::error::Error as JSONError;
@@ -40,6 +39,7 @@ pub enum Error {
     FromUtf8Error(FromUtf8Error),
     NoEvent,
     AckIDMissing,
+    NonBinaryHasAttachments,
 }
 
 impl From<JSONError> for Error {
@@ -55,7 +55,6 @@ impl From<FromUtf8Error> for Error {
 }
 
 impl Packet {
-    #[doc(hidden)]
     pub fn new_event(namespace: Option<String>,
                      id: Option<usize>,
                      attachments_num: usize,
@@ -73,6 +72,37 @@ impl Packet {
             id: id,
             data: Some(params),
             attachments: None,
+        }
+    }
+
+    pub fn new_error(namespace: Option<String>,
+                     error: Error) -> Packet {
+        Packet {
+            namespace: namespace,
+            attachments_num: 0,
+            opcode: Opcode::Error,
+            id: None,
+            data: Some(Value::String(format!("{:?}", error))),
+            attachments: None,
+        }
+    }
+    
+    pub fn new_ack(namespace: Option<String>,
+                   id: usize,
+                   attachments_num: usize,
+                   params: Value)
+                   -> Packet {
+        Packet {
+            namespace: namespace,
+            attachments_num: attachments_num,
+            opcode: if attachments_num == 0 {
+                Opcode::Ack
+            } else {
+                Opcode::BinaryAck
+            },
+            id: Some(id),
+            data: Some(params),
+            attachments: None
         }
     }
 
@@ -96,7 +126,7 @@ impl Packet {
     #[doc(hidden)]
     #[inline(always)]
     pub fn has_attachments(&self) -> bool {
-        self.attachments.is_some()
+        self.attachments.is_some() || self.attachments_num != 0
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Packet, Error> {
@@ -158,6 +188,10 @@ impl Packet {
                 if (opcode == Opcode::Ack || opcode == Opcode::BinaryAck) && !has_id {
                     return Err(Error::AckIDMissing);
                 }
+                if (opcode != Opcode::BinaryAck && opcode != Opcode::BinaryEvent)
+                    && attachments_num != 0 {
+                        return Err(Error::NonBinaryHasAttachments);
+                    }
                 if parsed.as_array().unwrap().is_empty() {
                     return Err(Error::NoEvent);
                 }
@@ -211,14 +245,6 @@ impl Packet {
         }
 
         s
-    }
-
-    /// Encode the packet to a engine.io `Packet`.
-    pub fn encode_to_engine_packet(&self) -> packet::Packet {
-        packet::Packet {
-            id: packet::ID::Message,
-            data: self.encode().into_bytes(),
-        }
     }
 }
 
