@@ -17,7 +17,7 @@ pub struct Socket {
     server_rooms: Arc<RwLock<HashMap<String, Vec<Socket>>>>,
     cur_packet: Arc<RwLock<Option<Packet>>>,
     last_ack_id: Arc<AtomicUsize>,
-    namespace: Option<String>,
+    namespace: Arc<RwLock<Option<String>>>,
     on_close: Arc<RwLock<Option<Box<Fn()>>>>,
 }
 
@@ -35,7 +35,7 @@ impl Socket {
             acks: Arc::new(Mutex::new(HashMap::new())),
             rooms_joined: Arc::new(RwLock::new(Vec::new())),
             server_rooms: server_rooms,
-            namespace: None,
+            namespace: Arc::new(RwLock::new(None)),
             cur_packet: Arc::new(RwLock::new(None)),
             last_ack_id: Arc::new(AtomicUsize::new(0)),
             on_close: Arc::new(RwLock::new(None)),
@@ -50,22 +50,19 @@ impl Socket {
                     // callback/ack
                     let packet = packet.take().unwrap();
                     match packet.opcode {
-                        Opcode::BinaryEvent | Opcode::Event => {
+                        Opcode::BinaryEvent => {
                             let ack = so.fire_callback(&packet);
 
-                            if packet.id.is_some() {
-                                if ack.is_some() {
-                                    let (json, binary) = encode_data(ack.unwrap());
-                                    so.send(json.to_string().into_bytes());
-                                    for b in binary {
-                                        so.send(b);
-                                    }
+                            if let Some(id) = packet.id {
+                                if let Some(ack) = ack {
+                                    let (json, binary) = encode_data(ack);
+                                    so.send_ack(id, json, binary);
                                 } else {
                                     so.send("[]".to_string().into_bytes());
                                 }
                             }
                         }
-                        Opcode::BinaryAck | Opcode::Ack => so.fire_ack(packet),
+                        Opcode::BinaryAck => so.fire_ack(&packet),
                         _ => unreachable!(),
                     }
                 } else {
@@ -73,10 +70,36 @@ impl Socket {
                 }
             }
 
-            let packet = match Packet::from_bytes(bytes) {
+            let packet: Packet = match Packet::from_bytes(bytes) {
                 Ok(p) => p,
-                Err(_) => return, //TODO: emit error here
+                Err(e) => {
+                    so.send(Packet::new_error(so.namespace.read().unwrap().clone(),
+                                              e).encode().into_bytes());
+                    return;
+                }, //TODO: emit error here
             };
+
+            match packet.opcode {
+                Opcode::Disconnect => {so.clone().close(); return;},
+                Opcode::Event => {
+                    let ack = so.fire_callback(&packet);
+
+                    if let Some(id) = packet.id {
+                        if let Some(ack) = ack {
+                            let (json, binary) = encode_data(ack);
+                            so.send_ack(id, json, binary);
+                        } else {
+                            so.send("[]".to_string().into_bytes());
+                        }
+                    }
+                }
+                Opcode::Ack => so.fire_ack(&packet),
+                Opcode::Connect => {
+                    *so.namespace.write().unwrap() = packet.namespace.clone();
+                },
+                _ => {},
+            }
+
             if packet.has_attachments() {
                 if packet.opcode == Opcode::BinaryEvent || packet.opcode == Opcode::BinaryAck {
                     // BinaryEvent and BinaryAck
@@ -115,18 +138,20 @@ impl Socket {
         }
     }
 
-    fn fire_ack(&self, packet: Packet) {
+    fn fire_ack(&self, packet: &Packet) {
         let map = self.acks.lock();
         if let Some(callback) = map.unwrap().remove(&packet.id.unwrap()) {
             callback(packet.data.clone(), packet.get_attachments().clone());
         }
     }
 
+    #[inline]
     fn has_buffered_packet(&self) -> bool {
         let cur = self.cur_packet.read().unwrap();
         cur.is_some()
     }
 
+    #[inline(always)]
     pub fn id(&self) -> String {
         self.socket.id()
     }
@@ -142,7 +167,6 @@ impl Socket {
         let mut rooms = self.rooms_joined.write().unwrap();
         if !rooms.contains(&room) {
             rooms.push(room.clone());
-            drop(rooms);
 
             let mut map = self.server_rooms.write().unwrap();
             if map.contains_key(&room) {
@@ -150,6 +174,21 @@ impl Socket {
             } else {
                 map.insert(room, vec![self.clone()]);
             }
+        }
+    }
+
+    pub fn leave(&self, room: String) {
+        let mut rooms_map = self.server_rooms.write().unwrap();
+        if let Some (_) = rooms_map.remove(&room) {
+            let mut rooms = self.rooms_joined.write().unwrap();
+        }
+    }
+
+    fn send_ack(&self, id: usize, json: Value, attachments: Vec<Vec<u8>>) {
+        self.send(Packet::new_ack(self.namespace.read().unwrap().clone(), id, attachments.len(), json).encode()
+                  .into_bytes());
+        for b in attachments {
+            self.send(b);
         }
     }
 
@@ -167,7 +206,7 @@ impl Socket {
         }
 
         let (json, binary_vec) = encode_data(all_event_params);
-        self.send(Packet::new_event(self.namespace.clone(), None, binary_vec.len(), json)
+        self.send(Packet::new_event(self.namespace.read().unwrap().clone(), None, binary_vec.len(), json)
             .encode()
             .into_bytes());
         for binary in binary_vec {
@@ -191,7 +230,7 @@ impl Socket {
             map.insert(ack_id, Box::new(on_ack));
         }
         let (json, binary_vec) = encode_data(all_event_params);
-        self.send(Packet::new_event(self.namespace.clone(), Some(ack_id), binary_vec.len(), json)
+        self.send(Packet::new_event(self.namespace.read().unwrap().clone(), Some(ack_id), binary_vec.len(), json)
             .encode()
             .into_bytes());
         for binary in binary_vec {
