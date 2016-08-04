@@ -2,7 +2,7 @@
 name = "socket-io"
 description = "A socket.io library for Iron."
 documentation = "https://vibhavp.github.io/engine.io-rs"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Vibhav Pant <vibhavp@gmail.com>"]
 license = "MIT"
 
